@@ -8,9 +8,9 @@ mnorm(M, v) = sqrt(dot(v, M * v))
 
 # Solov'ev 初始化管线：A 投影(全空间) → 强 curl → 限制到 V²₀ → Leray 清理 → 归一化
 # 返回强无散（机器精度）、B·n=0 的初始系数
-function solovev_initial_field(ops, q_star)
+function solovev_initial_field(ops, q_star; κ̄=1.0)
     Ah = Mantis.Assemblers.solve_L2_projection(
-        ops.X[2], solovev_A_field(q_star, ops.geom), ops.dΩ)
+        ops.X[2], solovev_A_field(q_star, ops.geom; κ̄=κ̄), ops.dΩ)
     b_full = ops.raw.M2 \ Vector(ops.raw.Kcurl * Ah.coefficients)
     b = Vector(ops.M2f \ (ops.E[3] * (ops.raw.M2 * b_full)))
     b, _, _ = leray(ops, b)

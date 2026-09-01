@@ -21,15 +21,17 @@ length(ARGS) == 1 || error("用法: julia --project=. plot_.jl data/run_A.jld2")
 file = ARGS[1]
 dat = load(file)
 n, p, q_star, ε = dat["n"], dat["p"], dat["q_star"], dat["eps"]
+κ = haskey(dat, "kappa") ? dat["kappa"] : 1.0
+δ = haskey(dat, "delta") ? dat["delta"] : 0.0
 b = dat["b"]
 
-println("重建算子 (n=$n, p=$p) ...")
-ops = setup_operators((n, n, 1), (p, p, 1), circular_torus_mapping(ε))
+println("重建算子 (n=$n, p=$p, ε=$ε, κ=$κ, δ=$δ) ...")
+ops = setup_operators((n, n, 1), (p, p, 1), torus_mapping(ε, κ, δ))
 _, pcoef, _, _, _ = force_velocity(ops, b)   # 最终态压强（Leray 副产品，V³）
 a = vector_potential(ops, b)
 
 # ---------- 单元索引/局部坐标约定自检 ----------
-let mp = circular_torus_mapping(ε)
+let mp = torus_mapping(ε, κ, δ)
     pts = Mantis.Points.CartesianPoints(([0.3], [0.2], [0.7]))
     x2 = Mantis.Geometry.evaluate(ops.geom, 2, pts)   # 单元 2 = r 方向第二个
     Φref = mp.mapping([1.3 / n, 0.2 / n, 0.7])
@@ -87,8 +89,10 @@ end
 
 Bhat_r = ddt(Az, tg)
 Bhat_t = -ddr(Az, rg)
-Rhat = [1 + ε * r * cospi(2t) for r in rg, t in tg]
-Vz = [-2π * ε^2 * r for r in rg] ./ Rhat            # V̂ζ = −2πε²r/R̂
+Rhat = [poloidal_position(ε, κ, δ, r, t)[1] for r in rg, t in tg]
+Wθ = [poloidal_jacobian(ε, κ, δ, t) for t in tg]      # W = f g′ − f′ g
+# 真空场 (1/R)e_φ 的 2-形式拉回 ζ-分量: V̂ζ = det(DΦ)/(2πR²) = r W(θ)/R̂
+Vz = [rg[i] * Wθ[j] / Rhat[i, j] for i in eachindex(rg), j in eachindex(tg)]
 curlz = ddr(At, rg) .- ddt(Ar, tg)
 # c 由环向通量匹配：∫∫B̂ζ dr dθ = −toroidal_flux；∫∫curlz = 0（边界项为零）
 trap(F) = sum((F[1:(end - 1), 1:(end - 1)] .+ F[2:end, 1:(end - 1)] .+
@@ -98,9 +102,10 @@ c_harm = (-toroidal_flux(ops, b) - trap(curlz)) / trap(Vz)
 Bhat_z = curlz .+ c_harm .* Vz
 println("  谐和系数 c = $c_harm, ∫∫curlz = $(trap(curlz))")
 
-# 压强（3-形式求值约定: num = p·detJ/(n_r·n_θ)）
+# 压强（3-形式求值约定: num = p·detJ/(n_r·n_θ)），det DΦ = 2π r R W(θ)
 _, _, Pnum = eval_grid(ops, 3, pcoef)
-detJg = [4π^2 * ε^2 * max(r, 1e-6) for r in rg] .* Rhat
+detJg = [2π * max(rg[i], 1e-6) * Rhat[i, j] * Wθ[j]
+         for i in eachindex(rg), j in eachindex(tg)]
 Pphys = Pnum[1] .* (ops.nel[1] * ops.nel[2]) ./ detJg
 Pphys[1, :] .= Pphys[2, :]   # 轴上 0/0，用邻行外推
 
@@ -127,11 +132,10 @@ P_f = bilinear(rg, tg, Pphys)
 # 磁轴（Shafranov 位移处）：压强极大点。ι 用绕磁轴的几何极向角累积
 # （坐标轴 r=0 在 (R,z)=(1,0)，内侧磁面不包围它，逻辑 θ̂ 不能用来数极向圈数）
 iax = argmax(Pphys)
-R_ax = 1 + ε * rg[iax[1]] * cospi(2 * tg[iax[2]])
-z_ax = ε * rg[iax[1]] * sinpi(2 * tg[iax[2]])
+R_ax, z_ax = poloidal_position(ε, κ, δ, rg[iax[1]], tg[iax[2]])
 println("  磁轴 ≈ (R,z) = ($R_ax, $z_ax)")
 
-RZ(u) = (1 + ε * u[1] * cospi(2 * u[2]), ε * u[1] * sinpi(2 * u[2]))
+RZ(u) = poloidal_position(ε, κ, δ, u[1], u[2])
 
 function trace_line(r0; transits=400, steps_per=64)
     f(u) = (bz = Bz_f(u[1], u[2]);
@@ -182,17 +186,18 @@ end
 println("  iota 范围: ", extrema(filter(isfinite, iotas)))
 
 # ---------- Poincaré 图 ----------
-tt = range(0, 2π; length=200)
+bd = [poloidal_position(ε, κ, δ, 1.0, t) for t in range(0, 1; length=400)]
+bdR, bdZ = first.(bd), last.(bd)
 fig = Figure(size=(1250, 620))
 ax1 = Axis(fig[1, 1]; xlabel="R", ylabel="z", title="Poincare (pressure)",
     aspect=DataAspect())
 sc1 = scatter!(ax1, Rs, Zs; color=Pc, colormap=:plasma, markersize=2)
-lines!(ax1, 1 .+ ε .* cos.(tt), ε .* sin.(tt); color=:gray)
+lines!(ax1, bdR, bdZ; color=:gray)
 Colorbar(fig[1, 2], sc1; label="p")
 ax2 = Axis(fig[1, 3]; xlabel="R", ylabel="z", title="Poincare (iota)",
     aspect=DataAspect())
 sc2 = scatter!(ax2, Rs, Zs; color=Ic, colormap=:turbo, markersize=2)
-lines!(ax2, 1 .+ ε .* cos.(tt), ε .* sin.(tt); color=:gray)
+lines!(ax2, bdR, bdZ; color=:gray)
 Colorbar(fig[1, 4], sc2; label="iota")
 out1 = replace(file, ".jld2" => "_poincare.png")
 save(out1, fig)
