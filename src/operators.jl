@@ -76,8 +76,8 @@ end
 function leray(ops, w::AbstractVector)
     n2, n3 = size(ops.M2, 1), size(ops.M3, 1)
     sol = ops.leray_fact \ [zeros(n2); -(ops.Kdiv * w); 0.0]
-    σ = sol[1:n2]                  # σ = −~grad p
-    p = sol[(n2 + 1):(n2 + n3)]
+    σ = sol[1:n2]                          # σ = −~grad p
+    p = -sol[(n2 + 1):(n2 + n3)]           # 鞍点解出的是 −p，翻转为物理压强
     return w + σ, p, σ
 end
 
