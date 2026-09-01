@@ -1,0 +1,9 @@
+data/
+mrx/
+*.pdf
+GPATH
+GRTAGS
+GTAGS
+tags
+parameter_smoke.jl
+debug_*.jl
