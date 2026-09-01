@@ -171,7 +171,131 @@ function trace_line(Br_f, Bt_f, Bz_f, RZ, R_ax, z_ax, r0;
     return pts, ang_tot / (2π * transits)
 end
 
+############################################################################################
+#                        3D（非轴对称）场重构与场线追踪                                    #
+############################################################################################
+# 2D 那边走矢势路线，是因为当时误判「2-形式求值分量互相混合」（真正坏的是 3D rank-2
+# 的解析 AnalyticalFormField 参考侧，见 PITFALLS #3）。2-形式求值其实是好的，
+# 所以 3D 直接求值 b，不需要矢势、也不需要把谐和场近似成解析真空场
+# —— 后者在仿星器上根本不成立（壁面不是回转面，cos∠ 只有 0.82）。
+
+# k-形式系数 → (r,θ,ζ) 三维网格上的 canonical 分量
+function eval_grid3(ops, k, coeffs; nr=97, nt=97, nz=49)
+    field = form_field(ops, k, coeffs)
+    ne = ops.nel
+    rg, tg, zg = collect(range(0, 1; length=nr)), collect(range(0, 1; length=nt)),
+    collect(range(0, 1; length=nz))
+    loc(g, n) = (el = [min(floor(Int, x * n) + 1, n) for x in g];
+    (el, [g[i] * n - (el[i] - 1) for i in eachindex(g)]))
+    elr, xir = loc(rg, ne[1])
+    elt, xit = loc(tg, ne[2])
+    elz, xiz = loc(zg, ne[3])
+    ncomp = (k == 1 || k == 2) ? 3 : 1
+    out = [zeros(nr, nt, nz) for _ in 1:ncomp]
+    for ez in 1:ne[3], et in 1:ne[2], er in 1:ne[1]
+        is, js, ks = findall(==(er), elr), findall(==(et), elt), findall(==(ez), elz)
+        (isempty(is) || isempty(js) || isempty(ks)) && continue
+        pts = Mantis.Points.CartesianPoints((xir[is], xit[js], xiz[ks]))
+        eid = er + ne[1] * ((et - 1) + ne[2] * (ez - 1))
+        vals, _ = Mantis.Forms.evaluate(field, eid, pts)
+        for c in 1:ncomp
+            out[c][is, js, ks] .= reshape(vals[c][:, 1], length(is), length(js), length(ks))
+        end
+    end
+    return rg, tg, zg, out
+end
+
+trapz3(F, rg, tg, zg) = sum(
+    (F[1:(end - 1), 1:(end - 1), 1:(end - 1)] .+ F[2:end, 1:(end - 1), 1:(end - 1)] .+
+     F[1:(end - 1), 2:end, 1:(end - 1)] .+ F[1:(end - 1), 1:(end - 1), 2:end] .+
+     F[2:end, 2:end, 1:(end - 1)] .+ F[2:end, 1:(end - 1), 2:end] .+
+     F[1:(end - 1), 2:end, 2:end] .+ F[2:end, 2:end, 2:end]) ./ 8) *
+                       (rg[2] - rg[1]) * (tg[2] - tg[1]) * (zg[2] - zg[1])
+
+# 2-形式系数 → 逻辑分量 B̂（canonical → 全局：分量 [jk] 乘单元测度 n_j·n_k）
+# flux_check 是与独立装配的环向通量的对照：∫∫∫B̂_ζ 应等于 −toroidal_flux
+function reconstruct_bhat3(ops, b; nr=97, nt=97, nz=49)
+    rg, tg, zg, Bn = eval_grid3(ops, 2, b; nr=nr, nt=nt, nz=nz)
+    n1, n2, n3 = ops.nel
+    Bz = Bn[3] .* (n1 * n2)
+    return (rg=rg, tg=tg, zg=zg,
+        Br=Bn[1] .* (n2 * n3), Bt=Bn[2] .* (n1 * n3), Bz=Bz,
+        flux_check=(trapz3(Bz, rg, tg, zg), -toroidal_flux(ops, b)))
+end
+
+# 三线性插值（θ、ζ 周期）
+function trilinear(rg, tg, zg, F)
+    nr, nt, nz = length(rg), length(tg), length(zg)
+    dr, dt, dz = rg[2] - rg[1], tg[2] - tg[1], zg[2] - zg[1]
+    return function (r, t, z)
+        tm, zm = mod(t, 1.0), mod(z, 1.0)
+        i = clamp(floor(Int, r / dr) + 1, 1, nr - 1)
+        j = clamp(floor(Int, tm / dt) + 1, 1, nt - 1)
+        k = clamp(floor(Int, zm / dz) + 1, 1, nz - 1)
+        fr = clamp((r - rg[i]) / dr, 0.0, 1.0)
+        ft, fz = (tm - tg[j]) / dt, (zm - zg[k]) / dz
+        v = 0.0
+        for (di, wi) in ((0, 1 - fr), (1, fr)), (dj, wj) in ((0, 1 - ft), (1, ft)),
+            (dk, wk) in ((0, 1 - fz), (1, fz))
+
+            v += wi * wj * wk * F[i + di, j + dj, k + dk]
+        end
+        return v
+    end
+end
+
+# 3D 场线追踪：dr/dζ = B̂r/B̂ζ, dθ/dζ = B̂θ/B̂ζ
+# 每 steps_per/nsub 步记录一次（nsub=1 即每整圈一个 Poincaré 点）。
+# 算 ι 需要 nsub>1：单圈的极向角增量可能超过 π，只按整圈采样会发生混叠。
+function trace_line3(Br_f, Bt_f, Bz_f, r0, θ0;
+    transits=400, steps_per=96, nsub=1, rmin=0.002, rmax=0.999)
+    f(u, z) = (bz = Bz_f(u[1], u[2], z);
+    SVector(Br_f(u[1], u[2], z) / bz, Bt_f(u[1], u[2], z) / bz))
+    h = 1.0 / steps_per
+    stride = max(steps_per ÷ nsub, 1)
+    u, ζ = SVector(r0, θ0), 0.0
+    pts = SVector{2, Float64}[]        # 每 stride 步一个（含子截面）
+    step = 0
+    for _ in 1:(transits * steps_per)
+        k1 = f(u, ζ); k2 = f(u + h / 2 * k1, ζ + h / 2)
+        k3 = f(u + h / 2 * k2, ζ + h / 2); k4 = f(u + h * k3, ζ + h)
+        un = u + h / 6 * (k1 + 2k2 + 2k3 + k4)
+        (rmin < un[1] < rmax) && all(isfinite, un) || return pts, false
+        u, ζ = un, ζ + h
+        step += 1
+        step % stride == 0 && push!(pts, u)
+    end
+    return pts, true
+end
+
+# 由子采样轨迹算 ι：绕参考轴（各子截面上的磁轴位置）累积极向角
+# axis_pts[m] = 第 m 个子截面上的磁轴 (R,z)
+function iota_from_track(pts, RZsub, axis_pts, nsub)
+    isempty(pts) && return NaN
+    ang_tot, prev = 0.0, NaN
+    for (i, u) in enumerate(pts)
+        m = mod1(i, nsub)
+        R, z = RZsub(u[1], u[2], m)
+        α = atan(z - axis_pts[m][2], R - axis_pts[m][1])
+        if !isnan(prev)
+            dα = α - prev
+            ang_tot += dα - 2π * round(dα / (2π))
+        end
+        prev = α
+    end
+    return ang_tot / (2π * (length(pts) - 1) / nsub)   # 极向圈数 / 环向圈数
+end
+
 # 平均轨道半径（用于剔除坐在磁轴上的退化种子线）
 mean_orbit_radius(pts, RZ, R_ax, z_ax) =
     isempty(pts) ? 0.0 :
     sum(hypot(RZ(u[1], u[2])[1] - R_ax, RZ(u[1], u[2])[2] - z_ax) for u in pts) / length(pts)
+
+# 3D 版：参考点逐子截面不同（磁轴是闭合曲线）
+mean_orbit_radius3(pts, RZsub, axis_pts, nsub) =
+    isempty(pts) ? 0.0 :
+    sum(enumerate(pts)) do (i, u)
+        m = mod1(i, nsub)
+        R, z = RZsub(u[1], u[2], m)
+        hypot(R - axis_pts[m][1], z - axis_pts[m][2])
+    end / length(pts)

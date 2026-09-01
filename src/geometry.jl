@@ -38,6 +38,53 @@ end
 
 circular_torus_mapping(ε::Float64) = torus_mapping(ε)
 
+# 3D 仿星器映射（论文 Eq. 3）：截面半径随环向角调制，破坏轴对称
+#   R(r,θ,ζ) = 1 + r ε a(ζ) cos2πθ,   Z(r,θ,ζ) = r ε b(ζ) sin2πθ
+#   ν(ζ) = 1 + (1 − κ) cos(2 n_fp π ζ)，论文 Eq. (3)：a(ζ) = ν(ζ)、b(ζ) = ν(ζ+1/2)
+#   det DΦ = 4π² ε² a(ζ) b(ζ) r R > 0
+# **半周期偏移是关键**：R、Z 半轴反相 ⇒ 截面是随 ζ 转 90° 的椭圆（旋转椭圆仿星器）。
+#   若误取 a = b = ν，截面恒为圆、只有半径脉动，那是波纹环——没有螺旋成形、
+#   没有真空旋转变换，根本不是仿星器（见 PITFALLS #9）。
+#   κ = 1 ⇒ ν ≡ 1 ⇒ 退化为圆截面环，可作自检。
+function stellarator_mapping(ε::Float64, κ::Float64, n_fp::Int)
+    amp = 1 - κ
+    ω = 2 * n_fp * π
+    ν(ζ) = 1 + amp * cos(ω * ζ)
+    dν(ζ) = -amp * ω * sin(ω * ζ)
+    a, da = ν, dν                        # R 半轴
+    b, db = (ζ -> ν(ζ + 0.5)), (ζ -> dν(ζ + 0.5))   # Z 半轴：ν(ζ+1/2)
+
+    function Φ(x::AbstractVector)
+        r, θ, ζ = x[1], x[2], x[3]
+        R = 1 + r * ε * a(ζ) * cospi(2θ)
+        return [R * cospi(2ζ), -R * sinpi(2ζ), r * ε * b(ζ) * sinpi(2θ)]
+    end
+    function DΦ(x::AbstractVector)
+        r, θ, ζ = x[1], x[2], x[3]
+        c, s = cospi(2θ), sinpi(2θ)
+        C, S = cospi(2ζ), sinpi(2ζ)
+        aζ, bζ, daζ, dbζ = a(ζ), b(ζ), da(ζ), db(ζ)
+        R = 1 + r * ε * aζ * c
+        Rr, Zr = ε * aζ * c, ε * bζ * s
+        Rθ, Zθ = -2π * r * ε * aζ * s, 2π * r * ε * bζ * c
+        Rζ, Zζ = r * ε * daζ * c, r * ε * dbζ * s
+        # J[i,j] = ∂Φᵢ/∂x̂ⱼ，SMatrix 按列填充
+        return SMatrix{3, 3}(
+            Rr * C, -Rr * S, Zr,                         # ∂/∂r
+            Rθ * C, -Rθ * S, Zθ,                         # ∂/∂θ
+            Rζ * C - 2π * R * S, -Rζ * S - 2π * R * C, Zζ,   # ∂/∂ζ
+        )
+    end
+    return Mantis.Geometry.Mapping((3, 3), Φ, DΦ)
+end
+
+# 仿星器截面调制因子与其在 (r,θ,ζ) 处的物理位置（画图/验证用）
+stellarator_nu(κ::Float64, n_fp::Int, ζ) = 1 + (1 - κ) * cos(2 * n_fp * π * ζ)
+function stellarator_position(ε::Float64, κ::Float64, n_fp::Int, r, θ, ζ)
+    a, b = stellarator_nu(κ, n_fp, ζ), stellarator_nu(κ, n_fp, ζ + 0.5)
+    return (1 + r * ε * a * cospi(2θ), r * ε * b * sinpi(2θ))
+end
+
 # --- 画图侧辅助（与上面的 f, g 定义一致）---
 
 # 逻辑 (r,θ) → 物理 (R,z)

@@ -36,6 +36,13 @@ function build_quadrature(X, deg::NTuple{3, Int}; extra::Int=3)
     )
 end
 
+# 只装配 0-形式质量矩阵（体积/求积检验用；比整套算子便宜得多，不做任何分解）
+function assemble_mass0(nel::NTuple{3, Int}, deg::NTuple{3, Int}, mapping; qextra::Int=3)
+    X = build_de_rham_complex(nel, deg, mapping)
+    dΩ = build_quadrature(X, deg; extra=qextra)
+    return assemble_bilinear((v, u) -> ∫(v ∧ ★(u), dΩ), X[1], X[1], dΩ)
+end
+
 function assemble_bilinear(expr_builder, Xtest, Xtrial, dΩ)
     wfi = Mantis.Assemblers.WeakFormInputs(Xtest, Xtrial)
     v = Mantis.Assemblers.get_test_form(wfi)
