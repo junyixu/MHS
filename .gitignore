@@ -1,9 +1,35 @@
+# 运行产物：run_*.jld2 与画图脚本直接写出的 png
 data/
+# 参考实现（Python/JAX），只读不修改
 mrx/
+# 论文与讲稿
 *.pdf
+slides/
+
+# 文档只发布 README.md，其余笔记留在本地
+*.md
+!README.md
+
+# Julia（Manifest.toml 故意入库：这是应用不是包，锁版本才可复现）
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+LocalPreferences.toml
+/docs/build/
+deps/build.log
+
+# 编辑器 / 索引
+.vscode/
+.idea/
+.DS_Store
+*~
+*.swp
+*.swo
 GPATH
 GRTAGS
 GTAGS
 tags
+
+# 临时脚本
 parameter_smoke.jl
 debug_*.jl
