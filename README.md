@@ -60,14 +60,16 @@ $B$ 取为 2-形式，于是 $\nabla\cdot B = 0$ 在**系数层面**恒等成立
 $\varepsilon = 1/3$，$q^\ast = 1.57$，$(n_r,n_\theta) = (8,8)$，$p = 3$，5000 步。
 左：压力着色；右：旋转变换 $\iota$ 着色。$\iota$ 从轴上 $0.78$ 单调降到边界 $0.55$。
 
-![圆截面 Poincaré](figures/run_A_poincare.png)
+[圆截面 Poincaré]
+<img width="2500" height="1240" alt="run_A_poincare" src="https://github.com/user-attachments/assets/15630c91-8ae7-484f-9d78-0f61260feff3" />
 
 ### 2. ITER D 形截面
 
 论文 V.D 参数：$\varepsilon = 0.33$、拉长比 $\kappa = 1.7$、三角形变 $\delta = 0.33$，$q^\ast = 1.57$。
 磁面被拉长并向内挤出 D 形，$\iota$ 从 $0.56$ 降到 $0.33$。
 
-![D 形 Poincaré](figures/run_B_poincare.png)
+[D 形 Poincaré]
+<img width="2500" height="1240" alt="run_B_poincare" src="https://github.com/user-attachments/assets/e011894e-602e-4730-9557-e593411437b7" />
 
 ### 3. 三维旋转椭圆仿星器
 
@@ -91,11 +93,15 @@ $Z$ 里那个半周期偏移不能丢：$n_{fp}$ 为奇数时 $\nu(\zeta+\tfrac1
 两个环向截面（$\zeta = 0$ 与 $\zeta = 1/6$）的 Poincaré 图。左图 $\iota = 3/5$ 处清晰可见
 **五岛链**，$\iota = 3/4$ 处还有一条四岛链：
 
-![仿星器 Poincaré](figures/run_C_poincare.png)
+[仿星器 Poincaré]
+<img width="2500" height="1280" alt="run_C_poincare" src="https://github.com/user-attachments/assets/2c21f6dd-b154-4f86-8fb6-a107eb86f073" />
 
 诊断曲线——力残差、能量、$\lVert\nabla\cdot B\rVert$、守恒量漂移：
 
-![仿星器诊断](figures/run_C_diag.png)
+[仿星器诊断]
+<img width="2200" height="1400" alt="run_C_diag" src="https://github.com/user-attachments/assets/d7285563-095b-4e6d-8762-ac498301685b" />
+
+
 
 | 量 | 实测 |
 | --- | --- |
@@ -115,7 +121,9 @@ $\iota$ 剖面与岛链结构已经收敛——它们比力残差收敛得快得
 
 `validate.jl` 做网格收敛阶测试，并把弛豫结果与 Solov'ev 解析解（论文 Eq. 8）逐点比较：
 
-![Solov'ev 对比](figures/validate_profiles.png)
+[Solov'ev 对比]
+<img width="2500" height="1640" alt="validate_profiles" src="https://github.com/user-attachments/assets/aaa7219a-b0d9-4e37-af59-ef89184db746" />
+
 
 ---
 
